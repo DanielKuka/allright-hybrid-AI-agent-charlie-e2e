@@ -1,5 +1,7 @@
 # Charlie quiz hybrid v2
 
+[![Charlie hybrid v2](https://github.com/DanielKuka/allright-hybrid-AI-agent-charlie-e2e/actions/workflows/charlie-hybrid.yml/badge.svg)](https://github.com/DanielKuka/allright-hybrid-AI-agent-charlie-e2e/actions/workflows/charlie-hybrid.yml)
+
 Невелике рішення тестового завдання на Playwright/TypeScript.
 
 ## Обраний варіант Частини B
