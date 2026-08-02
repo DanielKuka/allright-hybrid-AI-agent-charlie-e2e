@@ -5,6 +5,7 @@ import type { AgentAction, TestIdentity } from './types';
 const MODEL = 'claude-haiku-4-5-20251001';
 const TEMPERATURE = 0;
 const TOOL_NAME = 'next_action';
+const EXECUTABLE_ACTIONS = new Set(['click', 'fill', 'select', 'dismiss']);
 
 const NEXT_ACTION_TOOL: Anthropic.Tool = {
   name: TOOL_NAME,
@@ -89,7 +90,7 @@ Use \`text=\` only for plain text outside buttons and fields (e.g. a link).
 
 ## Situational rules
 
-- **Cookie banner** ("Ми дбаємо про вашу конфіденційність", buttons "Прийняти все" / "Відхилити все"): dismiss it with "Прийняти все" the FIRST time you see it, even if it does not visually block the control you want.
+- **Cookie banner.** Treat a cookie banner as present ONLY when its heading and enabled controls are literally included in the CURRENT snapshot. Never infer it from this rule, common website behaviour or prior knowledge. If the snapshot literally contains a cookie banner, dismiss it with its enabled accept button before continuing.
 
 - **Modal / popup / overlay** on top of the main content: dismiss it first. An element with role \`dialog\` is such a popup, even if it carries a call to action like "Завершити бронювання". Close it with its close control; do not interact with content underneath while it is open.
 
@@ -137,6 +138,44 @@ export class Agent {
       : '(no actions yet)';
     const currentProgress = this.progressLog[this.progressLog.length - 1];
 
+    const userMessage = [
+      `Current step progress: ${currentProgress}`,
+      '',
+      'Page snapshot (accessibility tree):',
+      snapshot,
+      '',
+      'Actions already performed (with the step they were taken at):',
+      historyText,
+      '',
+      'If the progress above is unchanged from the last entries in the history, the page did NOT advance — re-read the snapshot before deciding.',
+      '',
+      'Choose the next action.'
+    ].join('\n');
+    const action = await this.requestAction(userMessage);
+    if (actionIsGroundedInSnapshot(snapshot, action)) return action;
+
+    const firstSelector = 'selector' in action ? action.selector : '(missing)';
+    const correctedAction = await this.requestAction(
+      [
+        userMessage,
+        '',
+        `Your previous proposed selector (${firstSelector}) was rejected before execution because it is not represented in the CURRENT snapshot.`,
+        'Your observation was therefore not grounded in the supplied snapshot. Re-read only the snapshot above and choose a different, literally present control. Do not repeat the rejected selector.'
+      ].join('\n')
+    );
+    if (actionIsGroundedInSnapshot(snapshot, correctedAction)) {
+      return correctedAction;
+    }
+
+    const correctedSelector =
+      'selector' in correctedAction ? correctedAction.selector : '(missing)';
+    return {
+      type: 'stuck',
+      reason: `Модель двічі повернула selector поза поточним snapshot: "${firstSelector}", "${correctedSelector}"`
+    };
+  }
+
+  private async requestAction(userMessage: string): Promise<AgentAction> {
     const response = await this.client.messages.create({
       model: MODEL,
       max_tokens: 700,
@@ -147,25 +186,58 @@ export class Agent {
       messages: [
         {
           role: 'user',
-          content: [
-            `Current step progress: ${currentProgress}`,
-            '',
-            'Page snapshot (accessibility tree):',
-            snapshot,
-            '',
-            'Actions already performed (with the step they were taken at):',
-            historyText,
-            '',
-            'If the progress above is unchanged from the last entries in the history, the page did NOT advance — re-read the snapshot before deciding.',
-            '',
-            'Choose the next action.'
-          ].join('\n')
+          content: userMessage
         }
       ]
     });
 
     return parseToolAction(response);
   }
+}
+
+export function actionIsGroundedInSnapshot(
+  snapshot: string,
+  action: AgentAction
+): boolean {
+  if (!EXECUTABLE_ACTIONS.has(action.type)) return true;
+  if (!('selector' in action) || typeof action.selector !== 'string') return false;
+
+  const selector = action.selector.trim();
+  const roleMatch = selector.match(
+    /^role=([a-z][\w-]*)\[name="((?:[^"\\]|\\.)*)"\]$/i
+  );
+  if (roleMatch) {
+    const [, role, encodedName] = roleMatch;
+    let name = encodedName;
+    try {
+      name = JSON.parse(`"${encodedName}"`) as string;
+    } catch {
+      return false;
+    }
+    return snapshot.includes(`${role} ${JSON.stringify(name)}`);
+  }
+
+  const attributeMatch = selector.match(
+    /^\[(?:placeholder|aria-label)="((?:[^"\\]|\\.)*)"\]$/i
+  );
+  if (attributeMatch) {
+    try {
+      const value = JSON.parse(`"${attributeMatch[1]}"`) as string;
+      return snapshot.includes(value);
+    } catch {
+      return false;
+    }
+  }
+
+  const textMatch = selector.match(/^text=(.+)$/s);
+  if (textMatch) {
+    const value = textMatch[1].replace(/^(?:"(.*)"|'(.*)')$/s, '$1$2');
+    return snapshot.includes(value);
+  }
+
+  // The prompt permits a few selector forms that cannot always be mapped
+  // losslessly back to ariaSnapshot. Let Playwright validate those at runtime.
+  return true;
 }
 
 export function extractProgress(snapshot: string): string {

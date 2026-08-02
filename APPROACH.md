@@ -36,6 +36,11 @@ Accessibility snapshot кращий за screenshot для цього proof of c
 дає ролі, names, disabled state й компактніший за vision input. Prompt явно
 враховує accumulated DOM і наказує діяти лише на останньому блоці.
 
+Перед виконанням selector моделі звіряється з тим самим snapshot. Якщо роль і
+name у ньому відсутні, UI-дія не виконується, а модель отримує один correction
+call із явною причиною відхилення. Друга незаземлена відповідь повертає
+`stuck`; це обмежена перевірка grounding, а не navigation retry.
+
 Відомий `popup-leaving-page` є асинхронною механічною перешкодою, а не
 семантичним кроком квіза. Його обробляє Playwright locator handler перед
 snapshot і під час actionability retry. Тому popup, що виник поки Anthropic
@@ -94,7 +99,8 @@ Live flow:
 
 - LLM залишається стохастичним навіть із `temperature: 0`.
 - Повний snapshot accumulated DOM може спричинити повтор старого кроку.
-- Модель повертає text selector; selector hallucination дає `stuck`.
+- Модель повертає text selector; повторна selector hallucination або grounded,
+  але невиконувана дія дає `stuck`.
 - Anthropic availability, latency і cost стають частиною test infrastructure.
 - Дані форми передаються зовнішньому AI provider; допустимі лише синтетичні
   identities та погоджена data policy.

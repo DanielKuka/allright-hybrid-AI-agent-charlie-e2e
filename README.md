@@ -28,6 +28,8 @@ V2 свідомо зберігає runtime перевіреного AI-проє�
   між AI snapshot і виконанням дії;
 - terminal UI/network/backend evidence має пріоритет над рішенням AI зі
   snapshot, який міг застаріти під час model latency;
+- selector AI звіряється з поточним accessibility snapshot; для
+  незаземленої дії дозволений один correction call без UI side effect;
 - санітизовані agent artifacts, без trace/screenshot/video.
 
 Письмова Частина A: [APPROACH.md](APPROACH.md).
@@ -88,8 +90,9 @@ Live-тест створює реального stage-користувача і 
 
 ## Припущення й межі
 
-- AI повертає selector і може помилитися або повторити старий accumulated-DOM
-  крок. Це залишковий ризик Варіанта 2, а не прихований self-healing.
+- AI може помилитися або повторити старий accumulated-DOM крок. Selector поза
+  поточним snapshot отримує один correction call; повторна hallucination або
+  grounded, але невиконувана дія чесно повертає `stuck`.
 - Телефон, email та імена передаються Anthropic у system prompt, бо модель має
   заповнювати ці поля. Використовуються лише синтетичні дані.
 - Випадковий український номер повинен бути замінений зарезервованим тестовим
