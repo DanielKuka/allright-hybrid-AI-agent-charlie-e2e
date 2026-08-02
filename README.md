@@ -28,6 +28,8 @@ V2 свідомо зберігає runtime перевіреного AI-проє�
   між AI snapshot і виконанням дії;
 - terminal UI/network/backend evidence має пріоритет над рішенням AI зі
   snapshot, який міг застаріти під час model latency;
+- зміна route або progress під час model latency відкидає стару AI-дію без її
+  повторного виконання й бере свіжий snapshot;
 - selector AI звіряється з поточним accessibility snapshot; для
   незаземленої дії дозволений один correction call без UI side effect;
 - санітизовані agent artifacts, без trace/screenshot/video.

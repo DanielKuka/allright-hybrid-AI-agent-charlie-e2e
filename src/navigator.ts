@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 
-import { Agent } from './agent';
+import { Agent, extractProgress } from './agent';
 import {
   actionTargetsVisiblePopup,
   installPopupGuard,
@@ -53,6 +53,8 @@ export async function runNavigator(
 
     await popupGuardCheckpoint(page);
     const snapshot = await page.locator('body').ariaSnapshot();
+    const snapshotPath = new URL(page.url()).pathname;
+    const snapshotProgress = extractProgress(snapshot);
     const action = await agent.nextAction(snapshot, history);
     history.push(action);
     log.push({ step, action, timestamp: new Date().toISOString() });
@@ -67,6 +69,22 @@ export async function runNavigator(
         },
         log
       };
+    }
+
+    const currentSnapshot = await page.locator('body').ariaSnapshot();
+    const currentPath = new URL(page.url()).pathname;
+    const currentProgress = extractProgress(currentSnapshot);
+    const progressAdvanced =
+      snapshotProgress !== 'unknown' &&
+      currentProgress !== 'unknown' &&
+      currentProgress !== snapshotProgress;
+    if (currentPath !== snapshotPath || progressAdvanced) {
+      console.log(
+        `Navigator: discarded stale ${action.type} action after page advanced ` +
+          `from ${snapshotProgress} ${snapshotPath} to ${currentProgress} ${currentPath}`
+      );
+      await page.waitForTimeout(SETTLE_DELAY);
+      continue;
     }
 
     if (action.type === 'done' || action.type === 'stuck') {

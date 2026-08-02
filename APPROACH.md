@@ -53,6 +53,11 @@ snapshot і під час actionability retry. Тому popup, що виник �
 Це не маскує agent failure: `BOOKED` усе одно вимагає позитивних balances і
 filtered lesson record.
 
+Проміжний екран також може просунутися під час model latency. Якщо після
+відповіді AI змінився route або progress marker, дія зі старого snapshot не
+виконується і цикл бере новий snapshot. Це відкидання stale decision, а не
+повтор попередньої UI-дії.
+
 ## Що не фіксувати
 
 - точний step count і порядок питань;
