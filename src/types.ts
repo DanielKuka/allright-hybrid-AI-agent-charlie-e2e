@@ -32,10 +32,17 @@ export enum FunnelOutcome {
   FAILED = 'FAILED'
 }
 
+export enum LessonEvidence {
+  ACTIVE = 'ACTIVE',
+  INACTIVE = 'INACTIVE',
+  INDETERMINATE = 'INDETERMINATE'
+}
+
 export interface BackendEvidence {
   trialBalanceFound: boolean;
   lessonsScheduled: number;
   lessonRecords: number;
+  lessonEvidence: LessonEvidence;
 }
 
 export interface FlowResult {
@@ -45,4 +52,20 @@ export interface FlowResult {
   userId?: string;
   whoUserIs?: string;
   backend?: BackendEvidence;
+}
+
+export type CleanupEvidence =
+  | { status: 'DELETED'; httpStatus: number }
+  | { status: 'NOT_REQUIRED' }
+  | { status: 'FAILED'; reason: string };
+
+export interface ExperimentContext {
+  httpAssignment: unknown;
+  storageAssignment: unknown;
+}
+
+export interface LifecycleVerdict {
+  businessPassed: boolean;
+  cleanupPassed: boolean;
+  failures: string[];
 }

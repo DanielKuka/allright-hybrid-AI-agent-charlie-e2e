@@ -1,7 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 
 const POPUP_SELECTOR = 'dialog.popup-leaving-page';
-const CLOSE_BUTTON_NAME = /^(?:Close|Закрити)$/i;
+const CLOSE_BUTTON_NAME = /^(?:Close|Закрити|×)$/i;
 const GUARD_TIMEOUT = 3_000;
 
 export async function installPopupGuard(

@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "playwright test --project=unit",
     "test:unit": "playwright test --project=unit",
-    "check": "npm run typecheck && npm run test:unit",
+    "test:browser-contract": "playwright test --project=browser-contract",
+    "check": "npm run typecheck && npm run test:unit && npm run test:browser-contract",
     "test:e2e": "playwright test tests/charlie-hybrid.spec.ts --project=chromium --workers=1",
     "test:e2e:headed": "playwright test tests/charlie-hybrid.spec.ts --project=chromium --headed --workers=1"
   },

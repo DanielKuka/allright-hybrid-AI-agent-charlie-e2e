@@ -1,31 +1,27 @@
-name: Charlie hybrid v2
+name: Manual Stage E2E
 
 on:
-  pull_request:
   workflow_dispatch:
+    inputs:
+      confirm_side_effects:
+        description: I understand this run creates a real stage user, may book a lesson, and then attempts automatic cleanup
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
 
 concurrency:
   group: charlie-hybrid-stage
   cancel-in-progress: false
 
 jobs:
-  checks:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - run: npm run check
-
   live-stage:
-    if: github.event_name == 'workflow_dispatch'
-    needs: checks
+    if: inputs.confirm_side_effects == true
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    environment: stage
+    timeout-minutes: 10
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       STAGE_BASE_URL: https://stage.allright.com
@@ -37,11 +33,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e
-      - if: always()
+      - run: npm run test:e2e -- --workers=1
+      - if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report
-          path: playwright-report
+          name: sanitized-stage-failure-${{ github.run_id }}
+          path: sanitized-artifacts
           if-no-files-found: ignore
           retention-days: 7

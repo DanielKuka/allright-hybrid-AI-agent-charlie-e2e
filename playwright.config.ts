@@ -12,7 +12,12 @@ export default defineConfig({
   projects: [
     {
       name: 'unit',
-      testMatch: /.*\.unit\.spec\.ts/
+      testMatch: /.*\.unit\.spec\.ts/,
+      testIgnore: /(navigator|popup-guard)\.unit\.spec\.ts/
+    },
+    {
+      name: 'browser-contract',
+      testMatch: /(navigator|popup-guard)\.unit\.spec\.ts/
     },
     {
       name: 'chromium',

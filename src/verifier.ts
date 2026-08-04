@@ -5,6 +5,7 @@ import {
   type BackendEvidence,
   type FlowResult,
   FunnelOutcome,
+  LessonEvidence,
   type NavigatorOutcome
 } from './types';
 
@@ -38,9 +39,82 @@ function tutorTypeId(balance: Resource): string | null {
   return typeof id === 'string' || typeof id === 'number' ? String(id) : null;
 }
 
+function containsExplicitInactivity(value: unknown): boolean {
+  if (!record(value)) return false;
+  return Object.entries(value).some(([key, item]) => {
+    if (/cancel/i.test(key)) {
+      return item === true || /cancel/i.test(String(item));
+    }
+    if (/status/i.test(key) && typeof item === 'string') {
+      return /cancel|inactive|deleted|completed/i.test(item);
+    }
+    if (/^(?:is[-_]?active|active)$/i.test(key)) return item === false;
+    return false;
+  });
+}
+
+function futureLessonDate(attributes: Record<string, unknown>): boolean | null {
+  for (const [key, value] of Object.entries(attributes)) {
+    if (!/(?:^|[-_])(date|time|start|scheduled)(?:$|[-_])/i.test(key)) continue;
+    if (/created|updated/i.test(key) || typeof value !== 'string') continue;
+    const timestamp = Date.parse(value);
+    if (Number.isFinite(timestamp)) return timestamp >= Date.now();
+  }
+  return null;
+}
+
+function explicitStudentMatch(
+  resource: Resource,
+  userId: string | undefined
+): boolean | null {
+  if (!userId) return null;
+  if (record(resource.attributes)) {
+    for (const [key, value] of Object.entries(resource.attributes)) {
+      if (!/^student[-_]?id$/i.test(key)) continue;
+      if (typeof value === 'string' || typeof value === 'number') {
+        return String(value) === userId;
+      }
+    }
+  }
+  if (!record(resource.relationships)) return null;
+  const student = resource.relationships.student;
+  if (!record(student) || !record(student.data)) return null;
+  const id = student.data.id;
+  return typeof id === 'string' || typeof id === 'number'
+    ? String(id) === userId
+    : null;
+}
+
+export function parseLessonRecords(
+  lessons: unknown,
+  userId?: string
+): { lessonRecords: number; lessonEvidence: LessonEvidence } {
+  const records = resources(lessons, 'data');
+  const evidence = records.map((resource) => {
+    const attributes = record(resource.attributes) ? resource.attributes : {};
+    if (containsExplicitInactivity(attributes)) return LessonEvidence.INACTIVE;
+    if (explicitStudentMatch(resource, userId) === false) {
+      return LessonEvidence.INACTIVE;
+    }
+    const future = futureLessonDate(attributes);
+    if (future === false) return LessonEvidence.INACTIVE;
+    if (future === true) return LessonEvidence.ACTIVE;
+    return LessonEvidence.INDETERMINATE;
+  });
+
+  const lessonEvidence = evidence.includes(LessonEvidence.ACTIVE)
+    ? LessonEvidence.ACTIVE
+    : records.length === 0 ||
+        evidence.every((item) => item === LessonEvidence.INACTIVE)
+      ? LessonEvidence.INACTIVE
+      : LessonEvidence.INDETERMINATE;
+  return { lessonRecords: records.length, lessonEvidence };
+}
+
 export function parseBackendEvidence(
   balances: unknown,
-  lessons: unknown
+  lessons: unknown,
+  userId?: string
 ): BackendEvidence {
   const trialType = resources(balances, 'included').find(
     (item) =>
@@ -48,7 +122,10 @@ export function parseBackendEvidence(
       record(item.attributes) &&
       item.attributes.alias === 'trial'
   );
-  if (!trialType || (typeof trialType.id !== 'string' && typeof trialType.id !== 'number')) {
+  if (
+    !trialType ||
+    (typeof trialType.id !== 'string' && typeof trialType.id !== 'number')
+  ) {
     throw new Error('TutorType alias="trial" was not found');
   }
   const rows = resources(balances, 'data').filter(
@@ -60,11 +137,20 @@ export function parseBackendEvidence(
     const value = Number(item.attributes['lessons-scheduled']);
     return sum + (Number.isFinite(value) ? value : 0);
   }, 0);
+  const lessonRecords = parseLessonRecords(lessons, userId);
   return {
     trialBalanceFound: true,
     lessonsScheduled,
-    lessonRecords: resources(lessons, 'data').length
+    ...lessonRecords
   };
+}
+
+export function isBookedBackend(evidence: BackendEvidence): boolean {
+  return (
+    evidence.trialBalanceFound &&
+    evidence.lessonsScheduled >= 1 &&
+    evidence.lessonEvidence === LessonEvidence.ACTIVE
+  );
 }
 
 async function readBackend(page: Page, userId: string): Promise<BackendEvidence> {
@@ -81,7 +167,7 @@ async function readBackend(page: Page, userId: string): Promise<BackendEvidence>
       })
     );
   }, userId);
-  return parseBackendEvidence(balances, lessons);
+  return parseBackendEvidence(balances, lessons, userId);
 }
 
 async function pollBackend(page: Page, userId: string): Promise<BackendEvidence> {
@@ -91,7 +177,9 @@ async function pollBackend(page: Page, userId: string): Promise<BackendEvidence>
   while (Date.now() < deadline) {
     try {
       last = await readBackend(page, userId);
-      if (last.lessonsScheduled >= 1 && last.lessonRecords >= 1) return last;
+      if (isBookedBackend(last)) {
+        return last;
+      }
     } catch (error) {
       lastError = error;
     }
@@ -131,11 +219,11 @@ export class Verifier {
       (captured.lessonMutationSucceeded || /\/dashboard\/?$/.test(path))
     ) {
       const backend = await pollBackend(page, userId);
-      if (backend.lessonsScheduled >= 1 && backend.lessonRecords >= 1) {
+      if (isBookedBackend(backend)) {
         return {
           outcome: FunnelOutcome.BOOKED,
           reason:
-            'Backend confirms trial lessons-scheduled and a filtered lesson record',
+            'Backend confirms trial lessons-scheduled and an active future lesson',
           terminalUrl,
           userId,
           ...(captured.whoUserIs ? { whoUserIs: captured.whoUserIs } : {}),

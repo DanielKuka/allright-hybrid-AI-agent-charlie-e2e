@@ -6,8 +6,32 @@ import {
   type RegistrationObserver
 } from '../src/registration-observer';
 import { createTestIdentity, emailFor } from '../src/test-data';
-import { FunnelOutcome } from '../src/types';
-import { parseBackendEvidence, Verifier } from '../src/verifier';
+import { FunnelOutcome, LessonEvidence } from '../src/types';
+import {
+  parseBackendEvidence,
+  parseLessonRecords,
+  isBookedBackend,
+  Verifier
+} from '../src/verifier';
+
+const FUTURE_LESSON = '2099-01-01T10:00:00.000Z';
+const PAST_LESSON = '2020-01-01T10:00:00.000Z';
+
+function activeLesson(userId = '852948'): unknown {
+  return {
+    data: [
+      {
+        type: 'Lessons',
+        id: '1',
+        attributes: {
+          'student-id': userId,
+          'scheduled-at': FUTURE_LESSON,
+          status: 'scheduled'
+        }
+      }
+    ]
+  };
+}
 
 function balances(scheduled: number): unknown {
   return {
@@ -31,6 +55,7 @@ function observer(lessonMutationSucceeded: boolean): RegistrationObserver {
     snapshot: {
       userId: '852948',
       whoUserIs: 'parent',
+      registrationSucceeded: true,
       lessonMutationSucceeded
     },
     waitForUser: async () => '852948'
@@ -42,7 +67,7 @@ function pageAt(path: string, scheduled = 1): Page {
     url: () => `https://stage.allright.com${path}`,
     evaluate: async () => [
       balances(scheduled),
-      { data: scheduled > 0 ? [{ type: 'Lessons', id: '1' }] : [] }
+      scheduled > 0 ? activeLesson() : { data: [] }
     ],
     waitForTimeout: async () => undefined
   } as unknown as Page;
@@ -50,11 +75,12 @@ function pageAt(path: string, scheduled = 1): Page {
 
 test('parses trial balance and positive lesson evidence', () => {
   expect(
-    parseBackendEvidence(balances(1), { data: [{ type: 'Lessons', id: '1' }] })
+    parseBackendEvidence(balances(1), activeLesson(), '852948')
   ).toEqual({
     trialBalanceFound: true,
     lessonsScheduled: 1,
-    lessonRecords: 1
+    lessonRecords: 1,
+    lessonEvidence: LessonEvidence.ACTIVE
   });
 });
 
@@ -82,8 +108,61 @@ test('does not mistake available balance for a scheduled lesson', () => {
   expect(parseBackendEvidence(balances(0), { data: [] })).toEqual({
     trialBalanceFound: true,
     lessonsScheduled: 0,
-    lessonRecords: 0
+    lessonRecords: 0,
+    lessonEvidence: LessonEvidence.INACTIVE
   });
+});
+
+test('empty, cancelled, past, and unknown lesson payloads are not ACTIVE', () => {
+  expect(parseLessonRecords({ data: [] }, '852948').lessonEvidence).toBe(
+    LessonEvidence.INACTIVE
+  );
+  expect(
+    parseLessonRecords(
+      {
+        data: [
+          {
+            attributes: {
+              'student-id': '852948',
+              'scheduled-at': FUTURE_LESSON,
+              status: 'cancelled'
+            }
+          }
+        ]
+      },
+      '852948'
+    ).lessonEvidence
+  ).toBe(LessonEvidence.INACTIVE);
+  expect(
+    parseLessonRecords(
+      {
+        data: [
+          {
+            attributes: {
+              'student-id': '852948',
+              'scheduled-at': PAST_LESSON
+            }
+          }
+        ]
+      },
+      '852948'
+    ).lessonEvidence
+  ).toBe(LessonEvidence.INACTIVE);
+  expect(
+    parseLessonRecords({ data: [{ id: '1', attributes: {} }] }, '852948')
+      .lessonEvidence
+  ).toBe(LessonEvidence.INDETERMINATE);
+});
+
+test('non-empty unknown lesson schema cannot satisfy BOOKED evidence', () => {
+  const backend = parseBackendEvidence(
+    balances(1),
+    { data: [{ id: '1', attributes: {} }] },
+    '852948'
+  );
+
+  expect(backend.lessonEvidence).toBe(LessonEvidence.INDETERMINATE);
+  expect(isBookedBackend(backend)).toBe(false);
 });
 
 test('BOOKED backend evidence overrides a stale AI stuck result', async () => {
@@ -100,7 +179,8 @@ test('BOOKED backend evidence overrides a stale AI stuck result', async () => {
   expect(result.backend).toEqual({
     trialBalanceFound: true,
     lessonsScheduled: 1,
-    lessonRecords: 1
+    lessonRecords: 1,
+    lessonEvidence: LessonEvidence.ACTIVE
   });
 });
 

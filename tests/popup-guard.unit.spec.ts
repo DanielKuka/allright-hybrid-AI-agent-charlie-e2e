@@ -12,7 +12,7 @@ async function renderPageWithPopup(
   await page.setContent(`
     <button id="quiz-action" onclick="this.dataset.clicked = 'yes'">Далі</button>
     <dialog open class="ui-modal popup-leaving-page">
-      <button aria-label="Close" onclick="this.closest('dialog').close()">×</button>
+      <button aria-label="Close" onclick="this.dataset.clicked = String(Number(this.dataset.clicked || 0) + 1); this.closest('dialog').close()">×</button>
       <button id="popup-cta" onclick="this.dataset.clicked = 'yes'">
         Завершити бронювання
       </button>
@@ -49,6 +49,10 @@ test('checkpoint removes a popup before an accessibility snapshot is taken', asy
   await popupGuardCheckpoint(page);
 
   await expect(page.locator('dialog')).not.toBeVisible();
+  await expect(page.locator('button[aria-label="Close"]')).toHaveAttribute(
+    'data-clicked',
+    '1'
+  );
 });
 
 test('dismisses a popup that appears while Playwright is waiting to act', async ({
@@ -92,4 +96,24 @@ test('recognizes when the agent selected a control inside the visible popup', as
   await expect(
     actionTargetsVisiblePopup(page, 'role=button[name="Далі"]')
   ).resolves.toBe(false);
+});
+
+test('dismisses a popup whose only safe close label is the multiplication sign', async ({
+  page
+}) => {
+  await page.setContent(`
+    <dialog open class="ui-modal popup-leaving-page">
+      <button onclick="this.closest('dialog').close()">×</button>
+      <button id="popup-cta" onclick="this.dataset.clicked = 'yes'">Продовжити</button>
+    </dialog>
+  `);
+  await installPopupGuard(page);
+
+  await popupGuardCheckpoint(page);
+
+  await expect(page.locator('dialog')).not.toBeVisible();
+  await expect(page.locator('#popup-cta')).not.toHaveAttribute(
+    'data-clicked',
+    'yes'
+  );
 });

@@ -19,7 +19,9 @@ chain.
 - унікальність test data;
 - terminal outcome taxonomy;
 - trial balance через `TutorType.alias === "trial"`;
-- `lessons-scheduled >= 1` разом із filtered lesson record;
+- `lessons-scheduled >= 1` разом із позитивним evidence активного майбутнього
+  filtered lesson;
+- обов'язковий lifecycle cleanup створеного user;
 - ліміти кроків/часу та відсутність автоматичного live retry;
 - redaction artifacts.
 
@@ -50,8 +52,10 @@ snapshot і під час actionability retry. Тому popup, що виник �
 Так само navigation або `POST /lessons` можуть завершитися, поки модель ще
 аналізує попередній booking-screen snapshot. У цьому конфлікті terminal route,
 успішна lesson mutation і backend evidence мають пріоритет над `stuck` від AI.
-Це не маскує agent failure: `BOOKED` усе одно вимагає позитивних balances і
-filtered lesson record.
+Це не маскує agent failure: `BOOKED` усе одно вимагає trial balance,
+`lessons-scheduled >= 1` і tri-state lesson evidence `ACTIVE`. Порожній,
+скасований, неактивний або минулий урок має `INACTIVE`; непорожня невідома
+схема — `INDETERMINATE`. Жоден із них не дає `BOOKED`.
 
 Проміжний екран також може просунутися під час model latency. Якщо після
 відповіді AI змінився route або progress marker, дія зі старого snapshot не
@@ -83,22 +87,39 @@ self-healing.
 
 ## CI/CD
 
-На pull request:
+Safe CI на push у `main` і pull request:
 
 - typecheck;
 - mock agent contract tests;
 - parser/redaction tests;
 - без Anthropic і без створення stage users.
 
-Live flow:
+Manual Stage E2E:
 
-- у поточному workflow — лише вручну через `Run workflow`;
-- контрольований schedule можливий пізніше, після погодження side effects;
+- лише вручну через `Run workflow`, без schedule і PR trigger;
+- live job починається лише після обов'язкового checkbox про створення user,
+  можливе бронювання і automatic cleanup;
 - один worker, concurrency one;
 - no retry;
 - API key лише як GitHub Secret;
-- санітизовані artifacts;
+- failure artifacts лише після sanitization;
 - окремо рахувати agent failures і product business outcomes.
+
+## Cleanup і credentials
+
+OAuth observer встановлюється до першої navigation та перехоплює лише
+`access_token` і `user_id` з успішного `POST /oauth/token`. Token існує лише в
+пам'яті до cleanup. Registration `data.id` незалежно звіряється з OAuth
+`user_id`; mismatch забороняє destructive PATCH.
+
+Cleanup працює у `finally` після business verification для `BOOKED`,
+`LEAD_CREATED` і всіх failure paths. Успішний PATCH дає `DELETED`, відсутність
+створеного user — `NOT_REQUIRED`, а неможливість видалення створеного user —
+`FAILED`. Успішний business outcome з `FAILED` cleanup є червоним lifecycle
+result; product failure не може бути замаскований cleanup.
+
+Experiment context із cookie/localStorage `experiments` збирається best-effort
+лише для diagnostics. Конкретний A/B variant не є assertion.
 
 ## Ризики
 
@@ -112,11 +133,13 @@ Live flow:
 - Stage inventory визначає, чи funnel завершиться як `BOOKED`, чи через
   альтернативну terminal-гілку `LEAD_CREATED`; ці результати не можна
   маскувати один під одного.
-- Live flow створює сутності та може зачіпати CRM/analytics.
+- Live flow створює сутності та може зачіпати CRM/analytics до автоматичного
+  видалення; deletion каскадно скасовує майбутній урок.
 - Географія CI runner може впливати на A/B assignment і локалізацію.
 
 ## Чому реалізація невелика
 
 Практична частина обирає один vertical slice — Варіант 2. Вона не намагається
-стати універсальним agent framework. Production-hardening, масові replay
-набори та cleanup винесені за межі 4–6 годин і чесно описані як наступні кроки.
+стати універсальним agent framework: AI лишається навігатором мінливого UI, а
+мережеві boundaries, business verification, cleanup, sanitization і CI є
+детермінованими.

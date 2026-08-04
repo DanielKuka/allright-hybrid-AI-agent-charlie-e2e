@@ -1,4 +1,4 @@
-import type { Page, Request, Response } from '@playwright/test';
+import type { Page, Response } from '@playwright/test';
 
 import { emailFor } from './test-data';
 import type { TestIdentity } from './types';
@@ -45,28 +45,47 @@ export function parseRegistration(
 }
 
 export class RegistrationObserver {
+  private page: Page | undefined;
   private userId: string | undefined;
   private whoUserIs: string | undefined;
+  private registrationSucceeded = false;
   private lessonMutationSucceeded = false;
   private captureError: Error | undefined;
 
   constructor(private readonly identity: TestIdentity) {}
 
-  attach(page: Page): void {
-    page.on('requestfinished', (request) => {
-      void this.captureRequest(request);
-    });
-    page.on('response', (response) => {
-      const request = response.request();
-      const url = new URL(response.url());
-      if (
-        request.method() === 'POST' &&
-        url.pathname === '/api/v1/lessons' &&
-        response.ok()
-      ) {
-        this.lessonMutationSucceeded = true;
-      }
-    });
+  private readonly responseListener = (response: Response): void => {
+    const request = response.request();
+    const url = new URL(response.url());
+    if (
+      request.method() === 'POST' &&
+      CREATE_USER_PATH.test(url.pathname) &&
+      response.ok()
+    ) {
+      this.registrationSucceeded = true;
+      void this.captureRegistration(response);
+    }
+    if (
+      request.method() === 'POST' &&
+      url.pathname === '/api/v1/lessons' &&
+      response.ok()
+    ) {
+      this.lessonMutationSucceeded = true;
+    }
+  };
+
+  start(page: Page): void {
+    if (this.page) {
+      throw new Error('RegistrationObserver has already been started');
+    }
+    this.page = page;
+    page.on('response', this.responseListener);
+  }
+
+  stop(): void {
+    if (!this.page) return;
+    this.page.off('response', this.responseListener);
+    this.page = undefined;
   }
 
   hasCapturedUser(): boolean {
@@ -76,11 +95,13 @@ export class RegistrationObserver {
   get snapshot(): {
     userId?: string;
     whoUserIs?: string;
+    registrationSucceeded: boolean;
     lessonMutationSucceeded: boolean;
   } {
     return {
       ...(this.userId ? { userId: this.userId } : {}),
       ...(this.whoUserIs ? { whoUserIs: this.whoUserIs } : {}),
+      registrationSucceeded: this.registrationSucceeded,
       lessonMutationSucceeded: this.lessonMutationSucceeded
     };
   }
@@ -95,14 +116,11 @@ export class RegistrationObserver {
     return null;
   }
 
-  private async captureRequest(request: Request): Promise<void> {
-    if (request.method() !== 'POST') return;
-    const url = new URL(request.url());
-    if (!CREATE_USER_PATH.test(url.pathname)) return;
+  private async captureRegistration(response: Response): Promise<void> {
     try {
+      const request = response.request();
       const body = request.postDataJSON() as unknown;
-      const response = await request.response();
-      const json = (await response?.json()) as unknown;
+      const json = (await response.json()) as unknown;
       const registration = parseRegistration(body, json);
       this.userId = registration.userId;
       this.whoUserIs = registration.whoUserIs;
